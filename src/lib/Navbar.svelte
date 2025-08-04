@@ -12,7 +12,10 @@
 		X,
 		LayoutDashboard,
 		Search,
-		User as UserIcon
+		User as UserIcon,
+		FileText,
+		ChevronDown,
+		Users2
 	} from 'lucide-svelte';
 	import { onMount } from 'svelte';
 	import { supabase } from '$lib/supabase.js';
@@ -25,13 +28,23 @@
 	let searchQuery = '';
 	let searchResults = [];
 	let searchLoading = false;
+	let createDropdownOpen = false;
 
 	const toggleMobileMenu = () => {
 		mobileMenuOpen = !mobileMenuOpen;
+		createDropdownOpen = false;
 	};
 
 	const closeMobileMenu = () => {
 		mobileMenuOpen = false;
+	};
+
+	const toggleCreateDropdown = () => {
+		createDropdownOpen = !createDropdownOpen;
+	};
+
+	const closeCreateDropdown = () => {
+		createDropdownOpen = false;
 	};
 
 	const openSearchModal = () => {
@@ -46,7 +59,7 @@
 		searchResults = [];
 	};
 
-	const searchProfiles = async (query) => {
+	const searchContent = async (query) => {
 		if (!query || query.length < 2) {
 			searchResults = [];
 			return;
@@ -55,18 +68,61 @@
 		searchLoading = true;
 
 		try {
-			const { data, error } = await supabase
+			// Search profiles
+			const profilesPromise = supabase
 				.from('profiles')
 				.select('username, full_name, avatar_url, bio')
 				.or(`username.ilike.%${query}%,full_name.ilike.%${query}%`)
-				.limit(10);
+				.limit(5);
 
-			if (error) {
-				console.error('Search error:', error);
-				searchResults = [];
-			} else {
-				searchResults = data || [];
+			// Search startups
+			const startupsPromise = supabase
+				.from('startups')
+				.select('id, name, description, logo_url, category, website')
+				.eq('status', 'approved')
+				.or(`name.ilike.%${query}%,description.ilike.%${query}%,category.ilike.%${query}%`)
+				.limit(5);
+
+			// Search posts
+			const postsPromise = supabase
+				.from('posts')
+				.select('id, title, excerpt, slug, created_at')
+				.or(`title.ilike.%${query}%,excerpt.ilike.%${query}%,content.ilike.%${query}%`)
+				.limit(5);
+
+			const [profilesResult, startupsResult, postsResult] = await Promise.all([
+				profilesPromise,
+				startupsPromise,
+				postsPromise
+			]);
+
+			let results = [];
+
+			// Add profiles to results
+			if (profilesResult.data && !profilesResult.error) {
+				results.push(...profilesResult.data.map(profile => ({
+					...profile,
+					type: 'profile'
+				})));
 			}
+
+			// Add startups to results
+			if (startupsResult.data && !startupsResult.error) {
+				results.push(...startupsResult.data.map(startup => ({
+					...startup,
+					type: 'startup'
+				})));
+			}
+
+			// Add posts to results
+			if (postsResult.data && !postsResult.error) {
+				results.push(...postsResult.data.map(post => ({
+					...post,
+					type: 'post'
+				})));
+			}
+
+			searchResults = results;
 		} catch (error) {
 			console.error('Search error:', error);
 			searchResults = [];
@@ -75,9 +131,23 @@
 		}
 	};
 
-	const selectProfile = (username) => {
+	const selectResult = (result) => {
 		closeSearchModal();
-		goto(`/${username}`);
+		
+		switch (result.type) {
+			case 'profile':
+				goto(`/${result.username}`);
+				break;
+			case 'startup':
+				const startupUrlName = encodeURIComponent(result.name.toLowerCase().replace(/\s+/g, '-'));
+				goto(`/startup/${startupUrlName}`);
+				break;
+			case 'post':
+				goto(`/posts/${result.slug}`);
+				break;
+			default:
+				console.error('Unknown result type:', result.type);
+		}
 	};
 
 	// Debounce search
@@ -86,11 +156,14 @@
 		searchQuery = e.target.value;
 		clearTimeout(searchTimeout);
 		searchTimeout = setTimeout(() => {
-			searchProfiles(searchQuery);
+			searchContent(searchQuery);
 		}, 300);
 	};
 
 	const navItems = [
+		{ href: '/startups', label: 'Startups', icon: Building2 },
+		{ href: '/posts', label: 'Posts', icon: FileText },
+		// { href: '/groups', label: 'Groups', icon: Users2 },
 		{ href: '/about', label: 'About', icon: Users },
 		{ href: '/contact', label: 'Contact', icon: Mail }
 	];
@@ -107,6 +180,12 @@
 			scrolled = window.scrollY > 20;
 		};
 
+		const handleClickOutside = (event) => {
+			if (!event.target.closest('.create-dropdown')) {
+				createDropdownOpen = false;
+			}
+		};
+
 		// Check user authentication status
 		checkUser();
 
@@ -118,248 +197,159 @@
 		});
 
 		window.addEventListener('scroll', handleScroll);
+		document.addEventListener('click', handleClickOutside);
 
 		return () => {
 			window.removeEventListener('scroll', handleScroll);
+			document.removeEventListener('click', handleClickOutside);
 			subscription.unsubscribe();
 		};
 	});
 </script>
 
 <nav
-	class="fixed top-0 right-0 left-0 z-50 transition-all duration-500 ease-in-out {scrolled
-		? 'border-b border-gray-200/50 bg-white/90 shadow-xl backdrop-blur-lg'
-		: 'border-b border-gray-200/30 bg-white/95 shadow-lg backdrop-blur-sm'}"
+	class="fixed top-0 right-0 left-0 z-50 transition-all duration-300 {scrolled
+		? 'bg-white/95 backdrop-blur-lg shadow-lg border-b border-gray-200/80'
+		: 'bg-white/90 backdrop-blur-sm shadow-md border-b border-gray-200/50'}"
 >
-	<div class="xs:px-3 w-full max-w-none px-2 sm:px-4 md:px-6 lg:px-8 xl:mx-auto xl:max-w-7xl">
-		<div
-			class="flex items-center justify-between transition-all duration-500 ease-out {scrolled
-				? 'h-16 sm:h-18'
-				: 'h-18 sm:h-22'}"
-		>
+	<div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+		<div class="flex h-16 items-center justify-between">
 			<!-- Logo -->
-			<div class="min-w-0 flex-shrink-0">
-				<a
-					href="/"
-					class="flex items-center space-x-2 font-bold text-gray-900 transition-all duration-500 ease-out sm:space-x-3 {scrolled
-						? 'text-xl sm:text-2xl'
-						: 'text-2xl sm:text-3xl'}"
-				>
+			<div class="flex items-center">
+				<a href="/" class="group flex items-center space-x-3 p-2 rounded-lg transition-all duration-300 hover:bg-red-50">
 					<img
 						src="/favicon.png"
-						alt="SoftoBucket Logo"
-						class="flex-shrink-0 transition-all duration-500 ease-out {scrolled
-							? 'h-10 w-10 sm:h-12 sm:w-12'
-							: 'h-12 w-12 sm:h-14 sm:w-14'}"
+						alt="SoftoBucket"
+						class="h-8 w-8 transition-all duration-300 group-hover:scale-110 group-hover:rotate-12"
 					/>
-					<span class="xs:block hidden truncate transition-all duration-500 ease-out"
-						>SoftoBucket</span
-					>
-					<span class="xs:hidden text-lg">SoftoBucket</span>
+					<span class="text-xl font-bold text-gray-900 hidden sm:block transition-all duration-300 group-hover:text-red-600">SoftoBucket</span>
 				</a>
 			</div>
 
-			<!-- Right side container for nav links and button -->
-			<div class="flex items-center space-x-2 lg:space-x-4">
-				<!-- Desktop Navigation -->
-				<div class="hidden items-center space-x-2 lg:flex">
-					<!-- Search Button -->
-					<button
-						on:click={openSearchModal}
-						class="group relative flex items-center space-x-3 rounded-2xl px-5 py-4 text-lg font-semibold text-gray-700 transition-all duration-500 ease-out hover:bg-red-50/70 hover:text-red-800 hover:shadow-sm"
+			<!-- Desktop Navigation -->
+			<div class="hidden md:flex md:items-center md:space-x-2">
+				<!-- Nav Links -->
+				{#each navItems as item}
+					<a
+						href={item.href}
+						class="nav-link group relative flex items-center space-x-2 text-gray-700 hover:text-red-600 px-4 py-2.5 rounded-lg transition-all duration-300 {$page.url.pathname === item.href ? 'text-red-600 bg-red-50' : 'hover:bg-red-50'}"
 					>
-						<Search
-							size={22}
-							class="flex-shrink-0 transition-all duration-500 ease-out group-hover:scale-125 group-hover:rotate-3"
-						/>
-						<span
-							class="whitespace-nowrap transition-all duration-500 ease-out group-hover:tracking-wide"
-						>
-							Search Profiles</span
-						>
-					</button>
+						<svelte:component this={item.icon} size={18} class="transition-all duration-300 group-hover:scale-110" />
+						<span class="font-medium">{item.label}</span>
+						{#if $page.url.pathname === item.href}
+							<div class="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-12 h-0.5 bg-red-600 rounded-full"></div>
+						{/if}
+					</a>
+				{/each}
 
-					{#each navItems as item}
-						<a
-							href={item.href}
-							class="group relative flex items-center space-x-3 rounded-2xl px-5 py-4 text-lg font-semibold text-gray-700 transition-all duration-500 ease-out hover:text-red-800 {$page
-								.url.pathname === item.href
-								? 'bg-red-50/90 text-red-800 shadow-sm'
-								: 'hover:bg-red-50/70 hover:shadow-sm'}"
-							on:click={closeMobileMenu}
-						>
-							<svelte:component
-								this={item.icon}
-								size={22}
-								class="flex-shrink-0 transition-all duration-500 ease-out group-hover:scale-125 group-hover:rotate-3"
-							/>
-							<span
-								class="whitespace-nowrap transition-all duration-500 ease-out group-hover:tracking-wide"
-								>{item.label}</span
-							>
-							{#if $page.url.pathname === item.href}
-								<div
-									class="absolute bottom-1 left-1/2 h-2 w-2 -translate-x-1/2 transform rounded-full bg-red-800 transition-all duration-500 ease-out"
-								></div>
-							{/if}
-						</a>
-					{/each}
-				</div>
+				<!-- Search Button -->
+				<button
+					on:click={openSearchModal}
+					class="nav-link group flex items-center space-x-2 text-gray-700 hover:text-red-600 px-4 py-2.5 rounded-lg transition-all duration-300 hover:bg-red-50"
+				>
+					<Search size={18} class="transition-all duration-300 group-hover:scale-110" />
+					<span class="font-medium">Search</span>
+				</button>
 
-				<!-- Medium screens navigation -->
-				<div class="hidden items-center space-x-1 md:flex lg:hidden">
-					<!-- Search Button -->
-					<button
-						on:click={openSearchModal}
-						class="group relative flex items-center space-x-2 rounded-xl px-4 py-3 text-base font-semibold text-gray-700 transition-all duration-500 ease-out hover:bg-red-50/70 hover:text-red-800 hover:shadow-sm"
-					>
-						<Search
-							size={20}
-							class="flex-shrink-0 transition-all duration-500 ease-out group-hover:scale-125 group-hover:rotate-3"
-						/>
-						<span
-							class="whitespace-nowrap transition-all duration-500 ease-out group-hover:tracking-wide"
-							></span
-						>
-					</button>
-
-					{#each navItems as item}
-						<a
-							href={item.href}
-							class="group relative flex items-center space-x-2 rounded-xl px-4 py-3 text-base font-semibold text-gray-700 transition-all duration-500 ease-out hover:text-red-800 {$page
-								.url.pathname === item.href
-								? 'bg-red-50/90 text-red-800 shadow-sm'
-								: 'hover:bg-red-50/70 hover:shadow-sm'}"
-							on:click={closeMobileMenu}
-						>
-							<svelte:component
-								this={item.icon}
-								size={20}
-								class="flex-shrink-0 transition-all duration-500 ease-out group-hover:scale-125 group-hover:rotate-3"
-							/>
-							<span
-								class="whitespace-nowrap transition-all duration-500 ease-out group-hover:tracking-wide"
-								>{item.label}</span
-							>
-							{#if $page.url.pathname === item.href}
-								<div
-									class="absolute bottom-0.5 left-1/2 h-1.5 w-1.5 -translate-x-1/2 transform rounded-full bg-red-800 transition-all duration-500 ease-out"
-								></div>
-							{/if}
-						</a>
-					{/each}
-				</div>
-
-				<!-- Auth & Action Buttons (Desktop) -->
-				<div class="hidden flex-shrink-0 items-center space-x-3 md:flex">
+				<!-- Auth & Actions -->
+				<div class="flex items-center space-x-3 ml-4">
 					{#if user}
-						<!-- Dashboard Button for logged-in users -->
+						<!-- Create Dropdown -->
+						<div class="relative create-dropdown">
+							<button
+								on:click={toggleCreateDropdown}
+								class="create-btn group flex items-center space-x-2 bg-red-600 text-white px-4 py-2.5 rounded-lg hover:bg-red-700 transition-all duration-300 font-medium shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+							>
+								<Plus size={18} class="transition-transform duration-300 {createDropdownOpen ? 'rotate-45' : ''}" />
+								<span>Create</span>
+								<ChevronDown size={16} class="transition-transform duration-300 {createDropdownOpen ? 'rotate-180' : ''}" />
+							</button>
+
+							{#if createDropdownOpen}
+								<div class="dropdown-menu absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-50 animate-dropdown">
+									<a
+										href="/posts/create"
+										class="flex items-center space-x-3 px-4 py-3 text-gray-700 hover:bg-red-50 hover:text-red-600 transition-all duration-200"
+										on:click={closeCreateDropdown}
+									>
+										<FileText size={18} class="text-red-500" />
+										<span>New Post</span>
+									</a>
+									<a
+										href="/submit-startup"
+										class="flex items-center space-x-3 px-4 py-3 text-gray-700 hover:bg-red-50 hover:text-red-600 transition-all duration-200"
+										on:click={closeCreateDropdown}
+									>
+										<Rocket size={18} class="text-red-500" />
+										<span>New Startup</span>
+									</a>
+								</div>
+							{/if}
+						</div>
+
+						<!-- Dashboard -->
 						<a
 							href="/dashboard"
-							class="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold text-gray-700 transition-all duration-500 ease-out hover:scale-105 hover:bg-red-50/70 hover:text-red-800 {scrolled
-								? 'text-sm'
-								: 'text-base'}"
+							class="nav-link group flex items-center space-x-2 text-gray-700 hover:text-red-600 px-4 py-2.5 rounded-lg transition-all duration-300 hover:bg-red-50"
 						>
-							<LayoutDashboard
-								size={scrolled ? 16 : 18}
-								class="flex-shrink-0 transition-all duration-500 ease-out"
-							/>
-							<span class="whitespace-nowrap transition-all duration-500 ease-out">Dashboard</span>
-						</a>
-
-						<!-- Submit Startup Button -->
-						<a
-							href="/submit-startup"
-							class="inline-flex items-center gap-2 rounded-xl bg-red-800 font-bold text-white transition-all duration-500 ease-out hover:-translate-y-1 hover:scale-110 hover:bg-red-900 hover:shadow-2xl hover:shadow-red-800/40 {scrolled
-								? 'px-4 py-2.5 text-sm'
-								: 'px-5 py-3 text-base'}"
-						>
-							<Plus
-								size={scrolled ? 16 : 18}
-								class="flex-shrink-0 transition-all duration-500 ease-out"
-							/>
-							<span class="whitespace-nowrap transition-all duration-500 ease-out"
-								>Submit Startup</span
-							>
+							<LayoutDashboard size={18} class="transition-all duration-300 group-hover:scale-110" />
+							<span class="font-medium">Dashboard</span>
 						</a>
 					{:else}
-						<!-- Login Button for non-logged-in users -->
 						<a
 							href="/auth"
-							class="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold text-gray-700 transition-all duration-500 ease-out hover:scale-105 hover:bg-red-50/70 hover:text-red-800 {scrolled
-								? 'text-sm'
-								: 'text-base'}"
+							class="nav-link group flex items-center space-x-2 text-gray-700 hover:text-red-600 px-4 py-2.5 rounded-lg transition-all duration-300 hover:bg-red-50"
 						>
-							<LogIn
-								size={scrolled ? 16 : 18}
-								class="flex-shrink-0 transition-all duration-500 ease-out"
-							/>
-							<span class="whitespace-nowrap transition-all duration-500 ease-out">Login</span>
+							<LogIn size={18} class="transition-all duration-300 group-hover:scale-110" />
+							<span class="font-medium">Login</span>
 						</a>
-
-						<!-- Submit Startup Button -->
 						<a
 							href="/submit-startup"
-							class="inline-flex items-center gap-2 rounded-xl bg-red-800 font-bold text-white transition-all duration-500 ease-out hover:-translate-y-1 hover:scale-110 hover:bg-red-900 hover:shadow-2xl hover:shadow-red-800/40 {scrolled
-								? 'px-4 py-2.5 text-sm'
-								: 'px-5 py-3 text-base'}"
+							class="create-btn group flex items-center space-x-2 bg-red-600 text-white px-4 py-2.5 rounded-lg hover:bg-red-700 transition-all duration-300 font-medium shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
 						>
-							<Plus
-								size={scrolled ? 16 : 18}
-								class="flex-shrink-0 transition-all duration-500 ease-out"
-							/>
-							<span class="whitespace-nowrap transition-all duration-500 ease-out"
-								>Submit Startup</span
-							>
+							<Plus size={18} class="transition-all duration-300 group-hover:rotate-90" />
+							<span>Submit Startup</span>
 						</a>
 					{/if}
 				</div>
+			</div>
 
-				<!-- Mobile menu button -->
-				<div class="flex-shrink-0 md:hidden">
-					<button
-						on:click={toggleMobileMenu}
-						class="inline-flex items-center justify-center rounded-xl p-3 text-gray-700 transition-all duration-500 ease-out hover:scale-110 hover:bg-red-50/70 hover:text-red-800 focus:ring-2 focus:ring-red-500/50 focus:outline-none"
-						aria-expanded={mobileMenuOpen}
-					>
-						<span class="sr-only">Open main menu</span>
-						{#if mobileMenuOpen}
-							<X size={24} class="scale-110 rotate-180 transition-all duration-500 ease-out" />
-						{:else}
-							<Menu size={24} class="transition-all duration-500 ease-out hover:rotate-3" />
-						{/if}
-					</button>
-				</div>
+			<!-- Mobile menu button -->
+			<div class="md:hidden">
+				<button
+					on:click={toggleMobileMenu}
+					class="hamburger-btn p-2.5 rounded-lg text-gray-700 hover:text-red-600 hover:bg-red-50 transition-all duration-300"
+				>
+					<div class="hamburger-icon">
+						<span class="line top {mobileMenuOpen ? 'open' : ''}"></span>
+						<span class="line middle {mobileMenuOpen ? 'open' : ''}"></span>
+						<span class="line bottom {mobileMenuOpen ? 'open' : ''}"></span>
+					</div>
+				</button>
 			</div>
 		</div>
 	</div>
 
-	<!-- Mobile Navigation Menu -->
-	<div
-		class="transition-all duration-300 ease-in-out md:hidden {mobileMenuOpen
-			? 'max-h-96 opacity-100'
-			: 'max-h-0 overflow-hidden opacity-0'} border-t border-gray-200/50 bg-white/95 backdrop-blur-lg"
-	>
-		<div class="space-y-2 px-4 py-4">
-			<!-- Mobile Search Button -->
+	<!-- Mobile menu -->
+	<div class="mobile-menu md:hidden bg-white border-t border-gray-200 {mobileMenuOpen ? 'open' : ''}">
+		<div class="px-4 py-4 space-y-2">
+			<!-- Search -->
 			<button
 				on:click={() => {
 					openSearchModal();
 					closeMobileMenu();
 				}}
-				class="flex w-full items-center space-x-3 rounded-xl px-4 py-3 text-base font-medium text-gray-700 transition-all duration-300 hover:bg-red-50/50 hover:text-red-800"
+				class="mobile-nav-link flex items-center space-x-3 w-full text-left px-4 py-3 text-gray-700 hover:bg-red-50 hover:text-red-600 rounded-lg transition-all duration-300"
 			>
 				<Search size={20} />
-				<span>Search Profiles</span>
+				<span>Search Everything</span>
 			</button>
 
+			<!-- Nav Links -->
 			{#each navItems as item}
 				<a
 					href={item.href}
-					class="flex items-center space-x-3 rounded-xl px-4 py-3 text-base font-medium text-gray-700 transition-all duration-300 hover:text-red-800 {$page
-						.url.pathname === item.href
-						? 'bg-red-50/80 text-red-800'
-						: 'hover:bg-red-50/50'}"
+					class="mobile-nav-link flex items-center space-x-3 px-4 py-3 text-gray-700 hover:bg-red-50 hover:text-red-600 rounded-lg transition-all duration-300 {$page.url.pathname === item.href ? 'text-red-600 bg-red-50' : ''}"
 					on:click={closeMobileMenu}
 				>
 					<svelte:component this={item.icon} size={20} />
@@ -367,138 +357,211 @@
 				</a>
 			{/each}
 
-			<!-- Mobile Auth & Action Buttons -->
-			<div class="space-y-3 border-t border-gray-200/50 pt-4">
-				{#if user}
-					<a
-						href="/dashboard"
-						class="flex items-center justify-center gap-2 rounded-xl px-6 py-3 font-semibold text-gray-700 transition-all duration-300 hover:bg-red-50/70 hover:text-red-800"
-						on:click={closeMobileMenu}
-					>
-						<LayoutDashboard size={18} />
-						Dashboard
-					</a>
-					<a
-						href="/submit-startup"
-						class="flex items-center justify-center gap-2 rounded-xl bg-red-800 px-6 py-3 font-semibold text-white transition-all duration-300 hover:scale-105 hover:bg-red-900"
-						on:click={closeMobileMenu}
-					>
-						<Plus size={18} />
-						Submit Startup
-					</a>
-				{:else}
-					<a
-						href="/auth"
-						class="flex items-center justify-center gap-2 rounded-xl px-6 py-3 font-semibold text-gray-700 transition-all duration-300 hover:bg-red-50/70 hover:text-red-800"
-						on:click={closeMobileMenu}
-					>
-						<LogIn size={18} />
-						Login / Signup
-					</a>
-					<a
-						href="/submit-startup"
-						class="flex items-center justify-center gap-2 rounded-xl bg-red-800 px-6 py-3 font-semibold text-white transition-all duration-300 hover:scale-105 hover:bg-red-900"
-						on:click={closeMobileMenu}
-					>
-						<Plus size={18} />
-						Submit Startup
-					</a>
-				{/if}
-			</div>
+			<!-- Divider -->
+			<div class="h-px bg-gray-200 my-4"></div>
+
+			{#if user}
+				<!-- Create Options -->
+				<a
+					href="/posts/create"
+					class="mobile-nav-link flex items-center space-x-3 px-4 py-3 text-gray-700 hover:bg-red-50 hover:text-red-600 rounded-lg transition-all duration-300"
+					on:click={closeMobileMenu}
+				>
+					<FileText size={20} />
+					<span>Create Post</span>
+				</a>
+				<a
+					href="/submit-startup"
+					class="mobile-nav-link flex items-center space-x-3 px-4 py-3 text-gray-700 hover:bg-red-50 hover:text-red-600 rounded-lg transition-all duration-300"
+					on:click={closeMobileMenu}
+				>
+					<Rocket size={20} />
+					<span>Submit Startup</span>
+				</a>
+				<!-- Dashboard -->
+				<a
+					href="/dashboard"
+					class="mobile-nav-link flex items-center space-x-3 px-4 py-3 text-gray-700 hover:bg-red-50 hover:text-red-600 rounded-lg transition-all duration-300"
+					on:click={closeMobileMenu}
+				>
+					<LayoutDashboard size={20} />
+					<span>Dashboard</span>
+				</a>
+			{:else}
+				<a
+					href="/auth"
+					class="mobile-nav-link flex items-center space-x-3 px-4 py-3 text-gray-700 hover:bg-red-50 hover:text-red-600 rounded-lg transition-all duration-300"
+					on:click={closeMobileMenu}
+				>
+					<LogIn size={20} />
+					<span>Login</span>
+				</a>
+				<a
+					href="/submit-startup"
+					class="mobile-create-btn flex items-center space-x-3 px-4 py-3 bg-red-600 text-white hover:bg-red-700 rounded-lg transition-all duration-300"
+					on:click={closeMobileMenu}
+				>
+					<Plus size={20} />
+					<span>Submit Startup</span>
+				</a>
+			{/if}
 		</div>
 	</div>
 </nav>
 
 <!-- Search Modal -->
 {#if searchModalOpen}
-	<div class="fixed inset-0 z-50 flex items-start justify-center pt-32 px-4">
+	<div class="fixed inset-0 z-50 flex items-start justify-center pt-20 px-4">
 		<!-- Backdrop -->
-		<div class="absolute inset-0 bg-black/50 backdrop-blur-sm" on:click={closeSearchModal}></div>
+		<div class="absolute inset-0 bg-black/50 backdrop-blur-sm animate-fade-in" on:click={closeSearchModal}></div>
 
 		<!-- Modal Content -->
-		<div class="animate-modal-in relative mx-auto w-full max-w-md rounded-2xl bg-white shadow-2xl">
+		<div class="relative mx-auto w-full max-w-md bg-white rounded-xl shadow-2xl animate-modal-slide">
 			<!-- Header -->
-			<div class="flex items-center justify-between border-b border-gray-200 p-6">
+			<div class="flex items-center justify-between border-b border-gray-200 p-4">
 				<h3 class="flex items-center gap-2 text-lg font-semibold text-gray-900">
 					<Search size={20} class="text-red-600" />
-					Search Profiles
+					Search Everything
 				</h3>
 				<button
 					on:click={closeSearchModal}
-					class="gray-400 rounded-lg transition-colors duration-200 hover:bg-gray-100 hover:text-gray-600"
+					class="p-1 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-all duration-200"
 				>
 					<X size={20} />
 				</button>
 			</div>
 
 			<!-- Search Input -->
-			<div class="border-b border-gray-200 p-6">
+			<div class="p-4 border-b border-gray-200">
 				<div class="relative">
-					<div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-						<span class="text-lg text-gray-500">@</span>
+					<div class="absolute inset-y-0 left-0 flex items-center pl-3">
+						<Search size={16} class="text-gray-400" />
 					</div>
 					<input
 						type="text"
-						placeholder="Search by username or name..."
+						placeholder="Search profiles, startups, and posts..."
 						bind:value={searchQuery}
 						on:input={handleSearchInput}
-						class="w-full rounded-xl border border-gray-300 py-3 pr-4 pl-8 transition-colors duration-200 focus:border-red-500 focus:ring-2 focus:ring-red-500"
+						class="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-4 focus:border-red-500 focus:ring-2 focus:ring-red-500/20 transition-all duration-200"
 						autofocus
 					/>
 				</div>
 			</div>
 
 			<!-- Search Results -->
-			<div class="max-h-80 overflow-y-auto">
+			<div class="max-h-64 overflow-y-auto">
 				{#if searchLoading}
-					<div class="p-6 text-center">
-						<div class="mx-auto h-8 w-8 animate-spin rounded-full border-b-2 border-red-600"></div>
+					<div class="p-8 text-center">
+						<div class="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-red-600 border-t-transparent"></div>
 						<p class="mt-2 text-gray-500">Searching...</p>
 					</div>
 				{:else if searchQuery && searchResults.length === 0}
-					<div class="p-6 text-center">
-						<UserIcon size={32} class="mx-auto mb-2 text-gray-400" />
-						<p class="text-gray-500">No profiles found</p>
+					<div class="p-8 text-center">
+						<Search size={32} class="mx-auto mb-2 text-gray-400" />
+						<p class="text-gray-500">No results found</p>
 					</div>
 				{:else if searchResults.length > 0}
 					<div class="p-2">
-						{#each searchResults as profile}
+						{#each searchResults as result}
 							<button
-								on:click={() => selectProfile(profile.username)}
-								class="flex w-full items-center gap-3 rounded-xl p-4 text-left transition-colors duration-200 hover:bg-gray-50"
+								on:click={() => selectResult(result)}
+								class="flex w-full items-center gap-3 rounded-lg p-3 text-left hover:bg-gray-50 transition-all duration-200"
 							>
-								{#if profile.avatar_url}
-									<img
-										src={profile.avatar_url}
-										alt={profile.full_name || profile.username}
-										class="h-10 w-10 rounded-full border-2 border-gray-200 object-cover"
-									/>
-								{:else}
-									<div class="flex h-10 w-10 items-center justify-center rounded-full bg-red-100">
-										<UserIcon size={20} class="text-red-600" />
+								<!-- Result Icon/Image -->
+								{#if result.type === 'profile'}
+									{#if result.avatar_url}
+										<img
+											src={result.avatar_url}
+											alt={result.full_name || result.username}
+											class="h-10 w-10 rounded-full object-cover"
+										/>
+									{:else}
+										<div class="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100">
+											<UserIcon size={20} class="text-blue-600" />
+										</div>
+									{/if}
+								{:else if result.type === 'startup'}
+									{#if result.logo_url}
+										<img
+											src={result.logo_url}
+											alt="{result.name} logo"
+											class="h-10 w-10 rounded-lg object-cover border border-gray-200"
+										/>
+									{:else}
+										<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-red-100 border border-gray-200">
+											<Building2 size={20} class="text-red-600" />
+										</div>
+									{/if}
+								{:else if result.type === 'post'}
+									<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-green-100">
+										<FileText size={20} class="text-green-600" />
 									</div>
 								{/if}
 
+								<!-- Result Content -->
 								<div class="min-w-0 flex-1">
-									<div class="truncate font-semibold text-gray-900">
-										{profile.full_name || profile.username}
-									</div>
-									<div class="truncate text-sm text-gray-500">
-										@{profile.username}
-									</div>
-									{#if profile.bio}
-										<div class="mt-1 truncate text-xs text-gray-400">
-											{profile.bio}
+									{#if result.type === 'profile'}
+										<div class="truncate font-medium text-gray-900">
+											{result.full_name || result.username}
 										</div>
+										<div class="truncate text-sm text-gray-500">
+											@{result.username}
+										</div>
+										{#if result.bio}
+											<div class="mt-1 truncate text-xs text-gray-400">
+												{result.bio}
+											</div>
+										{/if}
+									{:else if result.type === 'startup'}
+										<div class="truncate font-medium text-gray-900">
+											{result.name}
+										</div>
+										<div class="truncate text-sm text-gray-500">
+											{result.category}
+										</div>
+										{#if result.description}
+											<div class="mt-1 truncate text-xs text-gray-400">
+												{result.description}
+											</div>
+										{/if}
+									{:else if result.type === 'post'}
+										<div class="truncate font-medium text-gray-900">
+											{result.title}
+										</div>
+										<div class="truncate text-sm text-gray-500">
+											Blog post
+										</div>
+										{#if result.excerpt}
+											<div class="mt-1 truncate text-xs text-gray-400">
+												{result.excerpt}
+											</div>
+										{/if}
+									{/if}
+								</div>
+
+								<!-- Result Type Badge -->
+								<div class="flex-shrink-0">
+									{#if result.type === 'profile'}
+										<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+											Profile
+										</span>
+									{:else if result.type === 'startup'}
+										<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+											Startup
+										</span>
+									{:else if result.type === 'post'}
+										<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+											Post
+										</span>
 									{/if}
 								</div>
 							</button>
 						{/each}
 					</div>
 				{:else}
-					<div class="p-6 text-center text-gray-500">
+					<div class="p-8 text-center text-gray-500">
 						<Search size={32} class="mx-auto mb-2 text-gray-400" />
-						<p>Start typing to search for profiles</p>
+						<p>Search for profiles, startups, and posts</p>
 					</div>
 				{/if}
 			</div>
@@ -507,13 +570,159 @@
 {/if}
 
 <style>
-	/* Custom backdrop blur for better browser support */
 	nav {
 		backdrop-filter: blur(12px);
 		-webkit-backdrop-filter: blur(12px);
 	}
 
-	@keyframes modal-in {
+	/* Hover effects for nav links */
+	.nav-link {
+		position: relative;
+		overflow: hidden;
+	}
+
+	.nav-link::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		background: linear-gradient(135deg, transparent, rgba(239, 68, 68, 0.1));
+		transform: translateX(-100%);
+		transition: transform 0.3s ease;
+	}
+
+	.nav-link:hover::before {
+		transform: translateX(0);
+	}
+
+	/* Create button animation */
+	.create-btn {
+		position: relative;
+		overflow: hidden;
+	}
+
+	.create-btn::before {
+		content: '';
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		width: 0;
+		height: 0;
+		background: rgba(255, 255, 255, 0.2);
+		border-radius: 50%;
+		transform: translate(-50%, -50%);
+		transition: width 0.6s, height 0.6s;
+	}
+
+	.create-btn:hover::before {
+		width: 300px;
+		height: 300px;
+	}
+
+	/* Hamburger menu animation */
+	.hamburger-icon {
+		width: 24px;
+		height: 20px;
+		position: relative;
+	}
+
+	.line {
+		position: absolute;
+		left: 0;
+		width: 100%;
+		height: 2px;
+		background: currentColor;
+		transition: all 0.3s ease;
+		transform-origin: center;
+	}
+
+	.line.top {
+		top: 0;
+	}
+
+	.line.middle {
+		top: 50%;
+		transform: translateY(-50%);
+	}
+
+	.line.bottom {
+		bottom: 0;
+	}
+
+	.line.top.open {
+		top: 50%;
+		transform: translateY(-50%) rotate(45deg);
+	}
+
+	.line.middle.open {
+		opacity: 0;
+		transform: translateY(-50%) scale(0);
+	}
+
+	.line.bottom.open {
+		bottom: 50%;
+		transform: translateY(50%) rotate(-45deg);
+	}
+
+	/* Mobile menu animation */
+	.mobile-menu {
+		max-height: 0;
+		overflow: hidden;
+		transition: max-height 0.3s ease-out;
+	}
+
+	.mobile-menu.open {
+		max-height: 600px;
+		transition: max-height 0.5s ease-in;
+	}
+
+	/* Mobile nav link animations */
+	.mobile-nav-link {
+		transform: translateX(-20px);
+		opacity: 0;
+		animation: slideIn 0.3s ease forwards;
+	}
+
+	.mobile-menu.open .mobile-nav-link {
+		animation-delay: calc(var(--index, 0) * 0.05s);
+	}
+
+	.mobile-create-btn {
+		transform: translateY(20px);
+		opacity: 0;
+		animation: slideUp 0.4s ease forwards;
+		animation-delay: 0.2s;
+	}
+
+	/* Dropdown animation */
+	@keyframes dropdown {
+		from {
+			opacity: 0;
+			transform: translateY(-10px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	.animate-dropdown {
+		animation: dropdown 0.2s ease-out;
+	}
+
+	/* Modal animations */
+	@keyframes fadeIn {
+		from {
+			opacity: 0;
+		}
+		to {
+			opacity: 1;
+		}
+	}
+
+	@keyframes modalSlide {
 		from {
 			opacity: 0;
 			transform: translateY(-20px) scale(0.95);
@@ -524,7 +733,36 @@
 		}
 	}
 
-	.animate-modal-in {
-		animation: modal-in 0.2s ease-out;
+	.animate-fade-in {
+		animation: fadeIn 0.2s ease-out;
 	}
+
+	.animate-modal-slide {
+		animation: modalSlide 0.3s ease-out;
+	}
+
+	/* Mobile animations */
+	@keyframes slideIn {
+		to {
+			transform: translateX(0);
+			opacity: 1;
+		}
+	}
+
+	@keyframes slideUp {
+		to {
+			transform: translateY(0);
+			opacity: 1;
+		}
+	}
+
+	/* Add index custom property for staggered animations */
+	.mobile-nav-link:nth-child(1) { --index: 1; }
+	.mobile-nav-link:nth-child(2) { --index: 2; }
+	.mobile-nav-link:nth-child(3) { --index: 3; }
+	.mobile-nav-link:nth-child(4) { --index: 4; }
+	.mobile-nav-link:nth-child(5) { --index: 5; }
+	.mobile-nav-link:nth-child(6) { --index: 6; }
+	.mobile-nav-link:nth-child(7) { --index: 7; }
+	.mobile-nav-link:nth-child(8) { --index: 8; }
 </style>

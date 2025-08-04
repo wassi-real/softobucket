@@ -93,6 +93,14 @@
         
           Join Community
         </a>
+        <a
+          href="/posts"
+          class="group inline-flex items-center gap-3 bg-red-600 hover:bg-red-700 text-white px-8 py-4 rounded-2xl font-bold text-lg transition-all duration-300 hover:scale-105 hover:shadow-xl"
+        >
+          <span class="text-xl">📝</span>
+          View Posts
+          <ArrowRight size={20} class="group-hover:translate-x-1 transition-transform duration-300" />
+        </a>
       </div>
       
       <!-- Fun Emoji Row -->

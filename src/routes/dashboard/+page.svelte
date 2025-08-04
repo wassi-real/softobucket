@@ -5,7 +5,7 @@
   import { 
     User, Settings, Building2, Heart, ExternalLink, Edit3, 
     Save, X, Plus, Trash2, Github, Twitter, Linkedin, 
-    Globe, Mail, MapPin, Calendar, Users
+    Globe, Mail, MapPin, Calendar, Users, FileText
   } from 'lucide-svelte';
   import FileUpload from '$lib/FileUpload.svelte';
   
@@ -13,10 +13,12 @@
   let profile = null;
   let userStartups = [];
   let likedStartups = [];
+  let userPosts = [];
   let loading = true;
   let editingProfile = false;
   let message = '';
   let messageType = 'info';
+  let activeTab = 'startups'; // startups, posts
   
   // Profile form data
   let profileForm = {
@@ -104,23 +106,20 @@
         userStartups = startupsData || [];
       }
       
-      // Load liked startups (mock data for now)
-      likedStartups = [
-        {
-          id: 1,
-          name: "TechFlow AI",
-          description: "AI-powered workflow automation platform",
-          category: "AI & Machine Learning",
-          logo: "🤖"
-        },
-        {
-          id: 2,
-          name: "EcoTrack",
-          description: "Sustainable supply chain tracking solution",
-          category: "Sustainability",
-          logo: "🌱"
-        }
-      ];
+      // Load user posts
+      const { data: postsData, error: postsError } = await supabase
+        .from('posts')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      
+      if (postsError) {
+        console.error('Error loading user posts:', postsError);
+      } else {
+        userPosts = postsData || [];
+      }
+      
+
       
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -180,6 +179,26 @@
       }
     } catch (error) {
       showMessage('Error deleting startup', 'error');
+    }
+  };
+  
+  const deletePost = async (postId) => {
+    if (!confirm('Are you sure you want to delete this post?')) return;
+    
+    try {
+      const { error } = await supabase
+        .from('posts')
+        .delete()
+        .eq('id', postId);
+      
+      if (error) {
+        showMessage('Error deleting post', 'error');
+      } else {
+        userPosts = userPosts.filter(p => p.id !== postId);
+        showMessage('Post deleted successfully', 'success');
+      }
+    } catch (error) {
+      showMessage('Error deleting post', 'error');
     }
   };
   
@@ -481,7 +500,29 @@
         </div>
         
         <!-- Right Column - Content -->
-        <div class="lg:col-span-2 space-y-6 lg:space-y-8">
+        <div class="lg:col-span-2">
+          <!-- Tabs -->
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-2 mb-6">
+            <div class="flex space-x-2">
+              <button
+                on:click={() => activeTab = 'startups'}
+                class="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold transition-all duration-300 {activeTab === 'startups' ? 'bg-red-800 text-white' : 'text-gray-600 hover:text-red-800 hover:bg-gray-50'}"
+              >
+                <Building2 size={20} />
+                Startups ({userStartups.length})
+              </button>
+              <button
+                on:click={() => activeTab = 'posts'}
+                class="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold transition-all duration-300 {activeTab === 'posts' ? 'bg-red-800 text-white' : 'text-gray-600 hover:text-red-800 hover:bg-gray-50'}"
+              >
+                <FileText size={20} />
+                Posts ({userPosts.length})
+              </button>
+            </div>
+          </div>
+          
+          <!-- Tab Content -->
+          {#if activeTab === 'startups'}
           <!-- My Startups -->
           <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 lg:p-8 transition-all duration-500 ease-out hover:shadow-md hover:border-gray-200">
             <div class="flex items-center justify-between mb-6">
@@ -569,6 +610,90 @@
             {/if}
           </div>
           
+          {:else if activeTab === 'posts'}
+          <!-- My Posts -->
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 lg:p-8 transition-all duration-500 ease-out hover:shadow-md hover:border-gray-200">
+            <div class="flex items-center justify-between mb-6">
+              <h2 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
+                <FileText size={24} class="text-red-800" />
+                My Posts ({userPosts.length})
+              </h2>
+              <a
+                href="/posts/create"
+                class="inline-flex items-center gap-2 bg-red-800 hover:bg-red-900 text-white px-4 py-2 rounded-lg font-semibold transition-colors duration-300"
+              >
+                <Plus size={18} />
+                Create Post
+              </a>
+            </div>
+            
+            {#if userPosts.length > 0}
+              <div class="space-y-4">
+                {#each userPosts as post}
+                  <div class="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                    <div class="flex items-start justify-between mb-4">
+                      <div class="flex-1">
+                        <h3 class="text-lg font-bold text-gray-900 mb-2">{post.title}</h3>
+                        {#if post.tags}
+                          <div class="flex flex-wrap gap-2 mb-3">
+                            {#each post.tags.split(',').slice(0, 3) as tag}
+                              <span class="inline-block bg-red-100 text-red-800 px-2 py-1 rounded-full text-sm font-medium">
+                                {tag.trim()}
+                              </span>
+                            {/each}
+                          </div>
+                        {/if}
+                      </div>
+                      <div class="flex gap-2">
+                        <a
+                          href="/posts/{post.slug}/edit"
+                          class="p-2 text-gray-400 hover:text-blue-600 transition-colors duration-300"
+                        >
+                          <Edit3 size={16} />
+                        </a>
+                        <button
+                          on:click={() => deletePost(post.id)}
+                          class="p-2 text-gray-400 hover:text-red-600 transition-colors duration-300"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <p class="text-gray-600 mb-4 leading-relaxed line-clamp-2">{post.excerpt || post.content.substring(0, 150) + '...'}</p>
+                    
+                    <div class="flex items-center justify-between">
+                      <span class="text-sm text-gray-500">
+                        {new Date(post.created_at).toLocaleDateString()}
+                      </span>
+                      <a
+                        href="/posts/{post.slug}"
+                        class="inline-flex items-center gap-1 text-red-800 hover:text-red-900 font-semibold text-sm"
+                      >
+                        <ExternalLink size={14} />
+                        View
+                      </a>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <div class="text-center py-12">
+                <FileText size={48} class="mx-auto text-gray-400 mb-4" />
+                <h3 class="text-lg font-semibold text-gray-900 mb-2">No posts yet</h3>
+                <p class="text-gray-600 mb-6">Create your first post to share your thoughts!</p>
+                <a
+                  href="/posts/create"
+                  class="inline-flex items-center gap-2 bg-red-800 hover:bg-red-900 text-white px-6 py-3 rounded-xl font-semibold transition-colors duration-300"
+                >
+                  <Plus size={18} />
+                  Create Your First Post
+                </a>
+              </div>
+            {/if}
+          </div>
+
+          {/if}
 
         </div>
       </div>
